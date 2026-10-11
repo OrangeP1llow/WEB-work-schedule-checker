@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Графік 4/4</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--text:#1a1d21;--muted:#6b7280;--work:#f59e0b;--work-bg:#fef3c7;--off:#10b981;--off-bg:#d1fae5;--border:#e5e7eb}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#181b21;--text:#e8eaed;--muted:#9aa0a6;--work-bg:#3b2f10;--off-bg:#0f3a2b;--border:#2a2e36}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;display:flex;justify-content:center;padding:16px}
+main{width:100%;max-width:480px;display:flex;flex-direction:column;gap:14px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:18px}
+.status{text-align:center}
+.status .big{font-size:2rem;font-weight:700;margin:4px 0}
+.status.work .big{color:var(--work)}.status.off .big{color:var(--off)}
+.status .sub{color:var(--muted)}
+.nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.nav button{background:none;border:1px solid var(--border);color:var(--text);border-radius:8px;width:38px;height:38px;font-size:1.1rem;cursor:pointer}
+.nav h2{margin:0;font-size:1.1rem;text-transform:capitalize}
+.grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.dow{text-align:center;font-size:.75rem;color:var(--muted);padding:4px 0}
+.day{aspect-ratio:1;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:.95rem;border:2px solid transparent}
+.day.work{background:var(--work-bg)}.day.off{background:var(--off-bg)}
+.day.today{border-color:var(--text);font-weight:700}
+.day.empty{visibility:hidden}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;justify-content:center;margin-top:10px;font-size:.85rem;color:var(--muted)}
+.dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px}
+.blocks{display:flex;flex-direction:column;gap:6px;font-size:.92rem}
+.blocks div{display:flex;justify-content:space-between;padding:8px 10px;border-radius:8px}
+.blocks .work{background:var(--work-bg)}.blocks .off{background:var(--off-bg)}
+h3{margin:0 0 10px;font-size:1rem}
+label{font-size:.85rem;color:var(--muted);display:block;margin-bottom:6px}
+input[type=date]{width:100%;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:1rem}
+.hint{font-size:.78rem;color:var(--muted);margin-top:6px}
+</style>
+</head>
+<body>
+<main>
+  <section id="status" class="card status"></section>
+  <section class="card">
+    <div class="nav">
+      <button id="prev" aria-label="Попередній місяць">‹</button>
+      <h2 id="title"></h2>
+      <button id="next" aria-label="Наступний місяць">›</button>
+    </div>
+    <div class="grid" id="grid"></div>
+    <div class="legend">
+      <span><i class="dot" style="background:var(--work)"></i>Робочий (15:00–01:00)</span>
+      <span><i class="dot" style="background:var(--off)"></i>Вихідний</span>
+    </div>
+  </section>
+  <section class="card">
+    <h3>Найближчі блоки</h3>
+    <div class="blocks" id="blocks"></div>
+  </section>
+  <section class="card">
+    <label for="start">Перший день будь-якого робочого блоку (4 робочих → 4 вихідних)</label>
+    <input type="date" id="start">
+    <div class="hint">Зберігається в браузері. Можна поділитись посиланням: <code>?start=2026-10-01</code></div>
+  </section>
+</main>
+<script>
+const MS = 86400000;
+const pad = n => String(n).padStart(2, '0');
+const iso = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const dayNum = d => Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / MS);
+const fromIso = s => { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); };
+
+const today = new Date();
+const params = new URLSearchParams(location.search);
+let startStr = params.get('start');
+try { if (!startStr) startStr = localStorage.getItem('start'); } catch(e){}
+const DEFAULT_START = '2026-10-09'; // перший день робочого блоку
+if (!startStr || isNaN(fromIso(startStr))) startStr = DEFAULT_START;
+
+let anchor = dayNum(fromIso(startStr));
+let view = new Date(today.getFullYear(), today.getMonth(), 1);
+
+const isWork = d => (((dayNum(d) - anchor) % 8) + 8) % 8 < 4;
+const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+const fmt = (d, o) => d.toLocaleDateString('uk-UA', o);
+const plural = n => n === 1 ? 'день' : (n >= 2 && n <= 4 ? 'дні' : 'днів');
+
+function runFrom(d) { // length of current block from d onward
+  const s = isWork(d); let n = 0, c = d;
+  while (isWork(c) === s && n < 10) { n++; c = addDays(c, 1); }
+  return { n, next: c };
+}
+
+function renderStatus() {
+  const w = isWork(today), { n, next } = runFrom(today);
+  const el = document.getElementById('status');
+  el.className = 'card status ' + (w ? 'work' : 'off');
+  el.innerHTML = `<div class="sub">Сьогодні, ${fmt(today,{day:'numeric',month:'long'})}</div>
+    <div class="big">${w ? 'Робочий день' : 'Вихідний'}</div>
+    <div class="sub">${n === 1 ? 'Останній' : 'Ще ' + (n-1) + ' ' + plural(n-1) + ' після сьогодні,'} ${n===1?'день блоку · ':''}${w ? 'далі вихідні' : 'далі робота'} з ${fmt(next,{day:'numeric',month:'long'})}</div>`;
+}
+
+function renderCalendar() {
+  const y = view.getFullYear(), m = view.getMonth();
+  document.getElementById('title').textContent = fmt(view, {month:'long', year:'numeric'});
+  const g = document.getElementById('grid');
+  g.innerHTML = ['Пн','Вт','Ср','Чт','Пт','Сб','Нд'].map(x => `<div class="dow">${x}</div>`).join('');
+  const offset = (new Date(y, m, 1).getDay() + 6) % 7;
+  for (let i = 0; i < offset; i++) g.insertAdjacentHTML('beforeend', '<div class="day empty"></div>');
+  const last = new Date(y, m + 1, 0).getDate();
+  for (let d = 1; d <= last; d++) {
+    const dt = new Date(y, m, d);
+    const cls = (isWork(dt) ? 'work' : 'off') + (iso(dt) === iso(today) ? ' today' : '');
+    g.insertAdjacentHTML('beforeend', `<div class="day ${cls}">${d}</div>`);
+  }
+}
+
+function renderBlocks() {
+  const box = document.getElementById('blocks');
+  box.innerHTML = '';
+  let c = today;
+  for (let i = 0; i < 8; i++) {
+    const w = isWork(c), { n, next } = runFrom(c);
+    const end = addDays(next, -1);
+    const f = d => fmt(d, {day:'numeric', month:'short'});
+    box.insertAdjacentHTML('beforeend',
+      `<div class="${w ? 'work' : 'off'}"><span>${w ? 'Робота' : 'Вихідні'}</span><span>${f(c)} – ${f(end)}</span></div>`);
+    c = next;
+  }
+}
+
+function render() { renderStatus(); renderCalendar(); renderBlocks(); }
+
+document.getElementById('prev').onclick = () => { view = new Date(view.getFullYear(), view.getMonth()-1, 1); renderCalendar(); };
+document.getElementById('next').onclick = () => { view = new Date(view.getFullYear(), view.getMonth()+1, 1); renderCalendar(); };
+const input = document.getElementById('start');
+input.value = startStr;
+input.onchange = () => {
+  if (!input.value) return;
+  anchor = dayNum(fromIso(input.value));
+  try { localStorage.setItem('start', input.value); } catch(e){}
+  render();
+};
+render();
+</script>
+</body>
+</html>
